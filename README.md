@@ -5,9 +5,9 @@ a tax organizer to a client, the client answers questions and uploads
 documents, and staff track progress and follow up on anything missing.
 
 This scaffold sets up the foundation everything else will sit on: the
-database schema, tenant isolation, and auth wiring. The organizer builder,
-client-facing forms, and staff dashboard are not built yet — see "What's
-next."
+database schema, tenant isolation, and a working sign-in flow. The
+organizer builder, client-facing forms, and the real staff/client dashboard
+content are not built yet — see "What's next."
 
 ## Architecture
 
@@ -91,9 +91,15 @@ Full definitions, constraints, and indexes are in
   security-definer functions rather than being open to the app role
   directly. Document uploads are logged automatically via a trigger;
   organizer submission is logged inside `submit_organizer()`.
-- **Secrets:** `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS entirely and must
+- **Secrets:** `SUPABASE_SECRET_KEY` bypasses RLS entirely and must
   only ever be used server-side (e.g. for admin actions like sending
   invites) — never in a Client Component, never logged, never committed.
+- **Session verification:** both `src/proxy.ts` and `getCurrentProfile()`
+  use `getClaims()` rather than `getUser()` — it verifies the JWT locally
+  against the project's cached JWKS instead of a network round-trip to the
+  Auth server on every request, which is Supabase's current guidance for
+  this. Either way, what a query actually returns is still decided by RLS,
+  not by which of these two functions read the JWT.
 
 **Regulatory context:** paid tax preparers are required to maintain a
 Written Information Security Plan (WISP) under IRS Publication 4557 and the
@@ -110,37 +116,66 @@ separate deliverable from the software.
 1. Create a project at [supabase.com](https://supabase.com).
 2. In the SQL Editor, run `supabase/migrations/0001_init.sql` (or use the
    Supabase CLI: `supabase link` then `supabase db push`).
-3. Copy `.env.example` to `.env.local` and fill in the three values from
-   Project Settings → API.
-4. `npm install`
-5. `npm run dev` and open `http://localhost:3000` — you should see a
-   confirmation page once the app can reach Supabase.
+3. **Configure email templates — required, easy to miss.** By default,
+   Supabase's magic-link/invite emails point to Supabase's own verification
+   endpoint, which isn't compatible with `src/app/auth/confirm/route.ts`
+   (that route expects `token_hash` + `type` directly). In Authentication →
+   Email Templates:
+   - **Magic Link:** point the link to
+     `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&next=/`
+   - **Invite user:** point the link to
+     `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=invite&next=/`
+
+   Then in Authentication → URL Configuration, set Site URL to match
+   `NEXT_PUBLIC_SITE_URL` below (`http://localhost:3000` for local dev) and
+   add it to the redirect allow list. Skip this step and the sign-in email
+   will look fine but the link will 404 or land somewhere unexpected.
+4. Copy `.env.example` to `.env.local` and fill in the values from Project
+   Settings → API Keys (`NEXT_PUBLIC_SUPABASE_URL`,
+   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`) plus
+   `NEXT_PUBLIC_SITE_URL`.
+5. `npm install`
+6. `npm run dev`, open `http://localhost:3000`, and you should land on
+   `/login`. Signing in emails a link; clicking it should land you on
+   `/dashboard` or `/portal` depending on role.
 
 ### Inviting users
 
 There's no invite UI yet. Until there is, invite someone from a trusted
-server context (e.g. the Supabase dashboard's "Invite user" or the admin
-API) and pass `firm_id`, `role`, and `full_name` in the invited user's
-metadata — the `handle_new_user` trigger reads those to create their
-`profiles` row and, for clients, link them to an existing `clients` row by
-matching email within the firm.
+server context (the Supabase dashboard's "Invite user," or
+`supabase.auth.admin.inviteUserByEmail()` from a server-only script using
+`SUPABASE_SECRET_KEY`) and pass `firm_id`, `role`, and `full_name` in the
+invited user's metadata — the `handle_new_user` trigger reads those
+immediately to create their `profiles` row (and, for clients, link an
+existing `clients` row by matching email within the firm). The invite email
+then carries them through the same `/auth/confirm` route as a normal
+sign-in, just with `type=invite`.
 
 ## What's built vs. what's next
 
 **Built:** schema, RLS policies, storage bucket + policies, auth session
 plumbing (browser/server Supabase clients, `src/proxy.ts` for session
 refresh — Next.js 16 renamed `middleware.ts` to `proxy.ts`), the controlled
-organizer-submission function, and a running app shell.
+organizer-submission function, and the full sign-in loop: passwordless
+email link → `/auth/confirm` → routed to `/dashboard` (staff) or `/portal`
+(client) based on `profiles.role`, with `/` and both destination pages
+redirecting signed-out visitors back to `/login`. Both destinations are
+still stubs — real content is next.
+
+**Auth approach:** email magic link only, no passwords, for both staff and
+clients — simplest to build correctly and nothing to leak or reuse. Route
+protection is per-page (`getCurrentProfile()` in `src/lib/auth.ts`, called
+at the top of each protected page), not centralized in the proxy — the
+proxy's only job is refreshing the session cookie. Password or SSO login
+can be added later without touching the data model.
 
 **Next, roughly in order:**
-1. Auth pages (sign in, accept-invite/set-password) and a route-level check
-   that sends signed-out users to sign in.
-2. Firm staff: create a client, build an organizer template, send an
+1. Firm staff: create a client, build an organizer template, send an
    organizer.
-3. Client-facing organizer form + document upload.
-4. Staff dashboard: status per client, view responses and documents, post a
+2. Client-facing organizer form + document upload.
+3. Staff dashboard: status per client, view responses and documents, post a
    follow-up request.
-5. AI-assisted extraction from uploaded documents (later — v1 is intentionally
+4. AI-assisted extraction from uploaded documents (later — v1 is intentionally
    manual/reliable first, AI-enhanced second).
 
 ## Before this touches real client data
@@ -150,7 +185,12 @@ goes anywhere near it:
 - Write tests that actually try to breach tenant isolation (client A reading
   client B's organizer, a client hitting a staff-only table directly) rather
   than only testing the happy path.
-- Add rate limiting on auth endpoints.
+- Confirm Supabase's default auth rate limiting is sufficient for
+  `signInWithOtp`, or add your own — right now anyone can request unlimited
+  sign-in emails to any address.
+- `src/app/error.tsx` currently shows the raw exception message to whoever
+  hits the error. Fine for now; before launch, log the real message
+  server-side and show clients/staff something generic instead.
 - Decide whether any single field (SSN, EIN) needs application-level
   encryption in addition to Supabase's at-rest encryption, since that
   affects whether/how those fields can be searched or indexed.

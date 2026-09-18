@@ -12,14 +12,14 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 export async function proxy(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
   // Runs on every route, including ones that don't need auth yet — so a
   // missing .env.local should degrade to "no session refresh" rather than
   // taking down every page in the app with an opaque SDK crash.
-  if (!supabaseUrl || !supabaseAnonKey) {
+  if (!supabaseUrl || !supabaseKey) {
     console.warn(
-      "[proxy] NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY are not set — " +
+      "[proxy] NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY are not set — " +
         "skipping session refresh. Copy .env.example to .env.local and fill these in."
     );
     return NextResponse.next();
@@ -29,7 +29,7 @@ export async function proxy(request: NextRequest) {
 
   const supabase = createServerClient(
     supabaseUrl,
-    supabaseAnonKey,
+    supabaseKey,
     {
       cookies: {
         getAll() {
@@ -46,7 +46,14 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  await supabase.auth.getUser();
+  // getClaims() verifies the JWT locally against the project's cached JWKS
+  // (for projects using asymmetric signing keys, the default for new
+  // projects) instead of a network round-trip to the Auth server on every
+  // request the way getUser() requires — Supabase's current recommendation
+  // for this refresh-on-every-request spot. Page-level checks that need the
+  // full user record still use getUser()/getClaims() again, deliberately —
+  // this call's only job is refreshing the cookie.
+  await supabase.auth.getClaims();
 
   return response;
 }
