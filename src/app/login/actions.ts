@@ -14,11 +14,16 @@ export async function signIn(
   const email = String(formData.get("email") ?? "").trim();
 
   if (!email || !email.includes("@")) {
-    return { status: "error", message: "Enter a valid email address." };
+    return {
+      status: "error",
+      message: "Enter a valid email address.",
+    };
   }
 
+  const siteUrl =
+    process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+
   const supabase = await createClient();
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
   const { error } = await supabase.auth.signInWithOtp({
     email,
@@ -28,8 +33,16 @@ export async function signIn(
   });
 
   if (error) {
-    return { status: "error", message: error.message };
+    console.error("[auth/sign-in] signInWithOtp failed:", error.message);
+
+    return {
+      status: "error",
+      message: error.message,
+    };
   }
 
-  return { status: "sent", message: `Check ${email} for a sign-in link.` };
+  return {
+    status: "sent",
+    message: `Check ${email} for a sign-in link.`,
+  };
 }

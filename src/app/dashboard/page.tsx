@@ -1,33 +1,35 @@
-import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getCurrentProfile } from "@/lib/auth";
-import { signOut } from "@/app/actions";
 
 export default async function DashboardPage() {
+  // The layout already redirected signed-out/client-role visitors away —
+  // this is just for the greeting text, not access control.
   const profile = await getCurrentProfile();
 
-  if (!profile) {
-    redirect("/login");
-  }
-  if (profile.role === "client") {
-    redirect("/portal");
-  }
-
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-4 px-6 py-12">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-ink">Firm dashboard</h1>
-        <form action={signOut}>
-          <button className="text-sm text-ink-muted underline underline-offset-2">
-            Sign out
-          </button>
-        </form>
+    <div className="flex flex-col gap-6">
+      <div>
+        <h1 className="text-2xl font-semibold text-ink">Dashboard</h1>
+        <p className="text-ink-muted">
+          Signed in as {profile?.full_name} ({profile?.role}).
+        </p>
       </div>
-      <p className="text-ink-muted">
-        Signed in as {profile.full_name} ({profile.role}).
-      </p>
-      <p className="rounded-md border border-hairline bg-white px-4 py-3 text-sm text-ink-muted">
-        Client list and the organizer builder land here next.
-      </p>
-    </main>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Link
+          href="/dashboard/clients"
+          className="rounded-md border border-hairline bg-white px-4 py-4 hover:border-ledger"
+        >
+          <p className="font-medium text-ink">Clients</p>
+          <p className="text-sm text-ink-muted">Add clients and send organizers.</p>
+        </Link>
+        <Link
+          href="/dashboard/templates"
+          className="rounded-md border border-hairline bg-white px-4 py-4 hover:border-ledger"
+        >
+          <p className="font-medium text-ink">Organizer templates</p>
+          <p className="text-sm text-ink-muted">Build reusable question sets.</p>
+        </Link>
+      </div>
+    </div>
   );
 }

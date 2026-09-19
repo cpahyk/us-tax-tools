@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 
 export type Profile = {
@@ -17,8 +18,12 @@ export type Profile = {
  * the Auth server (see src/proxy.ts for the same choice). Either way, the
  * actual row this returns is still gated by the profiles_select_same_firm
  * RLS policy, not by anything in this function.
+ *
+ * Wrapped in cache() so a layout and the pages under it can each call this
+ * for their own auth check without turning into N DB round-trips per
+ * request — React memoizes it per-request automatically.
  */
-export async function getCurrentProfile(): Promise<Profile | null> {
+export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getClaims();
   const userId = data?.claims?.sub;
@@ -38,4 +43,4 @@ export async function getCurrentProfile(): Promise<Profile | null> {
   }
 
   return profile as Profile;
-}
+});

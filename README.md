@@ -81,16 +81,27 @@ Full definitions, constraints, and indexes are in
   then flips the status and writes an audit log entry. This closes off
   things like a client setting `status = 'reviewed'` directly or editing
   another client's `firm_id`.
+- **Sending an organizer validates both ends:** `organizers.firm_id` and
+  `organizers.client_id` are independent foreign keys with nothing enforcing
+  they agree — a naive "insert with my firm_id" would let staff send an
+  organizer using another firm's `client_id`, and that firm's real client
+  would then see it via `organizers_select_client`, which only checks
+  `client_id`. `send_organizer()` (migration 0002) explicitly checks that
+  both the client and the template belong to the caller's own firm before
+  doing anything — caught by a test written specifically to try this, not
+  by inspection.
 - **Documents:** stored in a private Supabase Storage bucket
   (`client-documents`), never public. Storage policies mirror the database
   ones, keyed off the `{firm_id}/{client_id}/...` path prefix, so access is
   enforced by Storage itself, not just by the app choosing not to show a
   link.
-- **Audit log:** append-only — there's a `select` policy for staff, but no
-  `update`/`delete` policy for anyone, and inserts happen through
-  security-definer functions rather than being open to the app role
-  directly. Document uploads are logged automatically via a trigger;
-  organizer submission is logged inside `submit_organizer()`.
+- **Audit log:** append-only — everyone gets `select` scoped to their own
+  firm, but there's no `update`/`delete` policy for anyone. Staff can
+  `insert` directly, but only rows for their own firm attributed to
+  themselves (`firm_id`/`actor_id` both checked); clients can't insert at
+  all — their actions are logged via `submit_organizer()`, a
+  security-definer function, instead. Document uploads are logged
+  automatically via a trigger.
 - **Secrets:** `SUPABASE_SECRET_KEY` bypasses RLS entirely and must
   only ever be used server-side (e.g. for admin actions like sending
   invites) — never in a Client Component, never logged, never committed.
@@ -114,8 +125,10 @@ separate deliverable from the software.
 ## Setup
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. In the SQL Editor, run `supabase/migrations/0001_init.sql` (or use the
-   Supabase CLI: `supabase link` then `supabase db push`).
+2. In the SQL Editor, run both `supabase/migrations/0001_init.sql` and
+   `0002_send_organizer.sql`, in order (or use the Supabase CLI: `supabase
+   link` then `supabase db push`, which applies every migration file in
+   order automatically).
 3. **Configure email templates — required, easy to miss.** By default,
    Supabase's magic-link/invite emails point to Supabase's own verification
    endpoint, which isn't compatible with `src/app/auth/confirm/route.ts`
@@ -130,12 +143,26 @@ separate deliverable from the software.
    `NEXT_PUBLIC_SITE_URL` below (`http://localhost:3000` for local dev) and
    add it to the redirect allow list. Skip this step and the sign-in email
    will look fine but the link will 404 or land somewhere unexpected.
-4. Copy `.env.example` to `.env.local` and fill in the values from Project
+4. **Know the email sending limit before you start testing.** Supabase's
+   built-in email service (what you're using until you set up your own) is
+   capped at 2 emails/hour, is best-effort with no delivery guarantee, and
+   — unless you configure custom SMTP — will only deliver to addresses that
+   are members of your Supabase organization. You will hit this limit
+   almost immediately just by testing the sign-in flow a few times in a
+   row; the error looks like `Error message: email rate limit exceeded` or
+   `AuthApiError: Email rate limit exceeded`, and it is not a bug in this
+   app. Fix: Authentication → Sign In / Providers → SMTP Settings, add a
+   provider (Resend, Postmark, SendGrid, and similar all work and are
+   quick to set up), which also raises the limit to 30/hour by default
+   (adjustable in Authentication → Rate Limits) and lifts the
+   team-members-only restriction. Do this before inviting a real client to
+   test the client role, or their invite email will silently never arrive.
+5. Copy `.env.example` to `.env.local` and fill in the values from Project
    Settings → API Keys (`NEXT_PUBLIC_SUPABASE_URL`,
    `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`) plus
    `NEXT_PUBLIC_SITE_URL`.
-5. `npm install`
-6. `npm run dev`, open `http://localhost:3000`, and you should land on
+6. `npm install`
+7. `npm run dev`, open `http://localhost:3000`, and you should land on
    `/login`. Signing in emails a link; clicking it should land you on
    `/dashboard` or `/portal` depending on role.
 
@@ -153,29 +180,35 @@ sign-in, just with `type=invite`.
 
 ## What's built vs. what's next
 
-**Built:** schema, RLS policies, storage bucket + policies, auth session
-plumbing (browser/server Supabase clients, `src/proxy.ts` for session
-refresh — Next.js 16 renamed `middleware.ts` to `proxy.ts`), the controlled
-organizer-submission function, and the full sign-in loop: passwordless
-email link → `/auth/confirm` → routed to `/dashboard` (staff) or `/portal`
-(client) based on `profiles.role`, with `/` and both destination pages
-redirecting signed-out visitors back to `/login`. Both destinations are
-still stubs — real content is next.
+**Built:** schema across two migrations (0001: tenancy/organizers/documents/
+RLS; 0002: staff audit-log inserts + `send_organizer()`), storage bucket +
+policies, the full sign-in loop (passwordless email link → `/auth/confirm`
+→ routed to `/dashboard` or `/portal` by role), and the staff side: add a
+client, build an organizer template (dynamic question list — text, number,
+yes/no, choice, file), send a template to a client (copies the template's
+questions into that client's own organizer via `send_organizer()`, so later
+template edits don't retroactively change what they're filling out), send
+a portal invite, and see organizer status per client.
 
 **Auth approach:** email magic link only, no passwords, for both staff and
-clients — simplest to build correctly and nothing to leak or reuse. Route
-protection is per-page (`getCurrentProfile()` in `src/lib/auth.ts`, called
-at the top of each protected page), not centralized in the proxy — the
-proxy's only job is refreshing the session cookie. Password or SSO login
-can be added later without touching the data model.
+clients — simplest to build correctly and nothing to leak or reuse. Staff
+route protection is centralized in `src/app/dashboard/layout.tsx`
+(`getCurrentProfile()` from `src/lib/auth.ts`, memoized per-request with
+React's `cache()`); the portal stub still checks inline since it's a single
+page. The proxy's only job is refreshing the session cookie, not gating
+routes. Password or SSO login can be added later without touching the data
+model.
+
+**Not built yet:** editing a template or organizer after creation, deleting
+anything, and the "not activated yet" vs. "activated" client states are
+shown but not really acted on beyond the invite button.
 
 **Next, roughly in order:**
-1. Firm staff: create a client, build an organizer template, send an
-   organizer.
-2. Client-facing organizer form + document upload.
-3. Staff dashboard: status per client, view responses and documents, post a
-   follow-up request.
-4. AI-assisted extraction from uploaded documents (later — v1 is intentionally
+1. Client-facing organizer form + document upload — the client side of what
+   staff can now send.
+2. Staff view of a client's submitted answers and documents, plus posting a
+   follow-up request (`organizer_messages` already exists for this).
+3. AI-assisted extraction from uploaded documents (later — v1 is intentionally
    manual/reliable first, AI-enhanced second).
 
 ## Before this touches real client data
