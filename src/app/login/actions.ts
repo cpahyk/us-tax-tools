@@ -23,6 +23,7 @@ export async function signIn(
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {
+      shouldCreateUser: false,
       emailRedirectTo: `${siteUrl}/auth/confirm`,
     },
   });

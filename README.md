@@ -1,8 +1,10 @@
-# US Tax Tools — Tax Organizer & Client Portal (v0.1 scaffold)
+# US Tax Tools — Tax Organizer & Client Portal
 
 This is the first module of US Tax Tools: a secure portal where a firm sends
 a tax organizer to a client, the client answers questions and uploads
 documents, and staff track progress and follow up on anything missing.
+
+See [the September 2026 audit](docs/AUDIT-2026-09-20.md) for current fixes, validation, deployment requirements, and remaining findings. The security hardening migration supersedes the historical security details below.
 
 This scaffold sets up the foundation everything else will sit on: the
 database schema, tenant isolation, and a working sign-in flow. The
@@ -137,8 +139,8 @@ separate deliverable from the software.
 ## Setup
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. In the SQL Editor, run `0001_init.sql`, `0002_send_organizer.sql`, and
-   `0003_save_organizer_response.sql`, in order (or use the Supabase CLI:
+2. In the SQL Editor, run `0001_init.sql`, `0002_send_organizer.sql`,
+   `0003_save_organizer_response.sql`, and `0004_security_hardening.sql`, in order (or use the Supabase CLI:
    `supabase link` then `supabase db push`, which applies every migration
    file in order automatically).
 3. **Configure email templates — required, easy to miss.** By default,

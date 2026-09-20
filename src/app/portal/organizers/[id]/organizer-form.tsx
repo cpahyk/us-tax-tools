@@ -266,6 +266,8 @@ function FileField({
     setError(null);
     try {
       const supabase = createClient();
+      const { data: claims, error: authError } = await supabase.auth.getClaims();
+      if (authError || !claims?.claims?.sub) throw new Error("Please sign in again before uploading.");
       const path = `${firmId}/${clientId}/${crypto.randomUUID()}-${file.name}`;
 
       const { error: uploadError } = await supabase.storage
@@ -277,6 +279,7 @@ function FileField({
       const { data: docRow, error: insertError } = await supabase
         .from("documents")
         .insert({
+          uploaded_by: claims.claims.sub,
           firm_id: firmId,
           client_id: clientId,
           organizer_id: organizerId,

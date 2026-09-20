@@ -3,6 +3,7 @@ import type { Route } from "next";
 import { redirect } from "next/navigation";
 import { type NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { safeRedirectPath } from "@/lib/safe-redirect";
 
 /**
  * Handles every email-link auth flow (magic link sign-in, invite
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest) {
   const rawNext = searchParams.get("next");
   // Only ever follow a same-site relative path — never redirect to a
   // caller-supplied absolute URL (open-redirect guard).
-  const next = rawNext?.startsWith("/") ? rawNext : null;
+  const next = safeRedirectPath(rawNext);
 
   if (!token_hash || !type) {
     // No usable params at all almost always means the Magic Link / Invite
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
     // "Configure email templates".
     console.error(
       "[auth/confirm] Missing token_hash/type on the callback URL " +
-        `(got: ${request.url}). Check Authentication \u2192 Email Templates ` +
+        "Check Authentication \u2192 Email Templates " +
         "in Supabase — see README 'Configure email templates'."
     );
     redirect(
