@@ -9,6 +9,7 @@ export type TemplateItemInput = {
   help_text: string;
   response_type: "text" | "number" | "boolean" | "select" | "file";
   is_required: boolean;
+  choices?: string[];
 };
 
 type Result = { error?: string };
@@ -51,14 +52,19 @@ export async function createTemplate(input: {
     return { error: error?.message ?? "Couldn't create the template." };
   }
 
-  const rows = items.map((item, index) => ({
-    template_id: template.id,
-    sort_order: index,
-    prompt: item.prompt,
-    help_text: item.help_text.trim() || null,
-    response_type: item.response_type,
-    is_required: item.is_required,
-  }));
+  const rows = items.map((item, index) => {
+    const choices = (item.choices ?? []).map((c) => c.trim()).filter(Boolean);
+    return {
+      template_id: template.id,
+      sort_order: index,
+      prompt: item.prompt,
+      help_text: item.help_text.trim() || null,
+      response_type: item.response_type,
+      is_required: item.is_required,
+      options:
+        item.response_type === "select" && choices.length > 0 ? { choices } : null,
+    };
+  });
 
   const { error: itemsError } = await supabase.from("organizer_template_items").insert(rows);
 

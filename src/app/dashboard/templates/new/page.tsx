@@ -8,6 +8,7 @@ const emptyItem: TemplateItemInput = {
   help_text: "",
   response_type: "text",
   is_required: true,
+  choices: [],
 };
 
 export default function NewTemplatePage() {
@@ -20,6 +21,35 @@ export default function NewTemplatePage() {
 
   function updateItem(index: number, patch: Partial<TemplateItemInput>) {
     setItems((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  }
+
+  function updateChoice(itemIndex: number, choiceIndex: number, value: string) {
+    setItems((prev) =>
+      prev.map((item, i) => {
+        if (i !== itemIndex) return item;
+        const choices = [...(item.choices ?? [])];
+        choices[choiceIndex] = value;
+        return { ...item, choices };
+      })
+    );
+  }
+
+  function addChoice(itemIndex: number) {
+    setItems((prev) =>
+      prev.map((item, i) =>
+        i === itemIndex ? { ...item, choices: [...(item.choices ?? []), ""] } : item
+      )
+    );
+  }
+
+  function removeChoice(itemIndex: number, choiceIndex: number) {
+    setItems((prev) =>
+      prev.map((item, i) =>
+        i === itemIndex
+          ? { ...item, choices: (item.choices ?? []).filter((_, ci) => ci !== choiceIndex) }
+          : item
+      )
+    );
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -98,6 +128,41 @@ export default function NewTemplatePage() {
                 placeholder="Help text (optional)"
                 className="rounded-md border border-hairline px-3 py-2 text-sm outline-none focus:border-ledger"
               />
+              {item.response_type === "select" && (
+                <div className="flex flex-col gap-2 rounded-md border border-hairline bg-paper p-3">
+                  <p className="text-xs font-medium text-ink-muted">Choices</p>
+                  {(item.choices ?? []).map((choice, choiceIndex) => (
+                    <div key={choiceIndex} className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={choice}
+                        onChange={(e) => updateChoice(index, choiceIndex, e.target.value)}
+                        placeholder={`Choice ${choiceIndex + 1}`}
+                        className="flex-1 rounded-md border border-hairline px-2 py-1 text-sm outline-none focus:border-ledger"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeChoice(index, choiceIndex)}
+                        className="text-xs text-ink-muted underline underline-offset-2 hover:text-ink"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => addChoice(index)}
+                    className="w-fit text-xs text-ledger hover:underline"
+                  >
+                    + Add choice
+                  </button>
+                  {(item.choices ?? []).filter((c) => c.trim()).length === 0 && (
+                    <p className="text-xs text-red-600">
+                      Add at least one choice, or clients will get a plain text box instead.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <label className="flex items-center gap-2 text-sm text-ink-muted">
                   <input

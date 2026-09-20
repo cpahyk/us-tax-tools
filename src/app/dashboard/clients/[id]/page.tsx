@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { InviteButton, SendOrganizerForm } from "./client-actions";
@@ -73,7 +74,14 @@ export default async function ClientDetailPage({
               <tbody>
                 {(organizers as OrganizerRow[]).map((o) => (
                   <tr key={o.id} className="border-b border-hairline last:border-0">
-                    <td className="px-4 py-2 text-ink">{o.title}</td>
+                    <td className="px-4 py-2">
+                      <Link
+                        href={`/dashboard/organizers/${o.id}`}
+                        className="text-ledger hover:underline"
+                      >
+                        {o.title}
+                      </Link>
+                    </td>
                     <td className="px-4 py-2 text-ink-muted">{o.tax_year}</td>
                     <td className="px-4 py-2 text-ink-muted capitalize">{o.status}</td>
                   </tr>

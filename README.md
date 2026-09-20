@@ -90,11 +90,23 @@ Full definitions, constraints, and indexes are in
   both the client and the template belong to the caller's own firm before
   doing anything — caught by a test written specifically to try this, not
   by inspection.
+- **Answering a question also goes through a function, not raw RLS:**
+  clients already have direct INSERT/UPDATE RLS access to
+  `organizer_responses`, but flipping the parent organizer from `sent` to
+  `in_progress` on the first answer needs to touch `organizers`, which
+  clients have no UPDATE policy on at all. `save_organizer_response()`
+  (migration 0003) is security definer for that reason, and — like
+  `submit_organizer()` — re-checks that the question actually belongs to
+  the caller's own organizer and that the organizer is still in an
+  editable state before writing anything.
 - **Documents:** stored in a private Supabase Storage bucket
   (`client-documents`), never public. Storage policies mirror the database
   ones, keyed off the `{firm_id}/{client_id}/...` path prefix, so access is
   enforced by Storage itself, not just by the app choosing not to show a
-  link.
+  link. Viewing one goes through a signed URL (`src/lib/documents.ts`),
+  generated per-viewer with their own session and a one-hour expiry — the
+  signing call itself still goes through the same storage policies, so it
+  can't be used to see a file that viewer couldn't otherwise reach.
 - **Audit log:** append-only — everyone gets `select` scoped to their own
   firm, but there's no `update`/`delete` policy for anyone. Staff can
   `insert` directly, but only rows for their own firm attributed to
@@ -125,10 +137,10 @@ separate deliverable from the software.
 ## Setup
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. In the SQL Editor, run both `supabase/migrations/0001_init.sql` and
-   `0002_send_organizer.sql`, in order (or use the Supabase CLI: `supabase
-   link` then `supabase db push`, which applies every migration file in
-   order automatically).
+2. In the SQL Editor, run `0001_init.sql`, `0002_send_organizer.sql`, and
+   `0003_save_organizer_response.sql`, in order (or use the Supabase CLI:
+   `supabase link` then `supabase db push`, which applies every migration
+   file in order automatically).
 3. **Configure email templates — required, easy to miss.** By default,
    Supabase's magic-link/invite emails point to Supabase's own verification
    endpoint, which isn't compatible with `src/app/auth/confirm/route.ts`
@@ -157,12 +169,20 @@ separate deliverable from the software.
    (adjustable in Authentication → Rate Limits) and lifts the
    team-members-only restriction. Do this before inviting a real client to
    test the client role, or their invite email will silently never arrive.
-5. Copy `.env.example` to `.env.local` and fill in the values from Project
+5. **Notification emails (optional).** Separate from steps 3–4, which are
+   about Supabase Auth's own emails: this app also sends its own
+   notifications (organizer submitted, new message) via
+   [Resend](https://resend.com) directly — reusing the same Resend account
+   from step 4 if you set one up there is the easiest path. Without a
+   `RESEND_API_KEY`, the app still works fine; it just skips sending these
+   and logs a warning instead.
+6. Copy `.env.example` to `.env.local` and fill in the values from Project
    Settings → API Keys (`NEXT_PUBLIC_SUPABASE_URL`,
    `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`) plus
-   `NEXT_PUBLIC_SITE_URL`.
-6. `npm install`
-7. `npm run dev`, open `http://localhost:3000`, and you should land on
+   `NEXT_PUBLIC_SITE_URL` and, if you did step 5, `RESEND_API_KEY` /
+   `EMAIL_FROM`.
+7. `npm install`
+8. `npm run dev`, open `http://localhost:3000`, and you should land on
    `/login`. Signing in emails a link; clicking it should land you on
    `/dashboard` or `/portal` depending on role.
 
@@ -180,36 +200,54 @@ sign-in, just with `type=invite`.
 
 ## What's built vs. what's next
 
-**Built:** schema across two migrations (0001: tenancy/organizers/documents/
-RLS; 0002: staff audit-log inserts + `send_organizer()`), storage bucket +
-policies, the full sign-in loop (passwordless email link → `/auth/confirm`
-→ routed to `/dashboard` or `/portal` by role), and the staff side: add a
-client, build an organizer template (dynamic question list — text, number,
-yes/no, choice, file), send a template to a client (copies the template's
-questions into that client's own organizer via `send_organizer()`, so later
-template edits don't retroactively change what they're filling out), send
-a portal invite, and see organizer status per client.
+**Built:** schema across three migrations (0001: tenancy/organizers/
+documents/RLS; 0002: staff audit-log inserts + `send_organizer()`; 0003:
+`save_organizer_response()`), storage bucket + policies, the full sign-in
+loop, and both sides of the organizer loop end to end:
+
+- **Staff:** add a client, build a template, send an organizer, invite to
+  the portal, then open `/dashboard/organizers/[id]` to see every answer
+  and a real (signed, expiring) link to each uploaded file, read/post in
+  that organizer's message thread, and mark a submitted one reviewed (an
+  atomic status-guarded update, logged to `audit_log`).
+- **Client:** `/portal` lists their organizers; `/portal/organizers/[id]`
+  is the fill-out form — per-field autosave (text, number, yes/no, choice,
+  file upload straight to Storage from the browser), the same message
+  thread as staff sees, and a submit button wired to `submit_organizer()`
+  (required-item validation included). Once submitted, the page becomes
+  genuinely read-only, with the same signed-URL links for anything they
+  uploaded.
+- **Notifications:** email via Resend (`src/lib/email.ts`) when a client
+  submits (to the staff member who sent it) and whenever either side posts
+  a message (to whoever didn't post it), each with a direct link back to
+  the organizer. Optional — with no `RESEND_API_KEY` set, these calls log a
+  warning and skip sending rather than failing the submission or message
+  they're attached to, which still succeed either way.
+
+Signed URLs (`src/lib/documents.ts`) are generated with each viewer's own
+session, so they only work for documents that viewer's RLS/storage
+policies already permit — an hour-long expiry, regenerated on every page
+load.
 
 **Auth approach:** email magic link only, no passwords, for both staff and
-clients — simplest to build correctly and nothing to leak or reuse. Staff
-route protection is centralized in `src/app/dashboard/layout.tsx`
-(`getCurrentProfile()` from `src/lib/auth.ts`, memoized per-request with
-React's `cache()`); the portal stub still checks inline since it's a single
-page. The proxy's only job is refreshing the session cookie, not gating
-routes. Password or SSO login can be added later without touching the data
-model.
+clients — simplest to build correctly and nothing to leak or reuse. Both
+`/dashboard` and `/portal` centralize their auth check in their own
+`layout.tsx` (`getCurrentProfile()` from `src/lib/auth.ts`, memoized
+per-request with React's `cache()`). The proxy's only job is refreshing the
+session cookie, not gating routes.
 
-**Not built yet:** editing a template or organizer after creation, deleting
-anything, and the "not activated yet" vs. "activated" client states are
-shown but not really acted on beyond the invite button.
+**Known gap (closed):** the template builder now has a choices editor for
+"Choice" questions — add/remove/edit choices inline when that response
+type is selected, written to `organizer_items.options` as
+`{"choices": [...]}`, which the client-side form already knew how to read.
 
-**Next, roughly in order:**
-1. Client-facing organizer form + document upload — the client side of what
-   staff can now send.
-2. Staff view of a client's submitted answers and documents, plus posting a
-   follow-up request (`organizer_messages` already exists for this).
-3. AI-assisted extraction from uploaded documents (later — v1 is intentionally
-   manual/reliable first, AI-enhanced second).
+**Not built yet:** editing a template or organizer after creation, and
+deleting anything.
+
+**Next:** AI-assisted extraction from uploaded documents — the last item
+on the original v1 roadmap for this module. Everything before it (schema,
+auth, the full send → fill out → submit → review → mark reviewed loop,
+messaging, notifications) is built and tested.
 
 ## Before this touches real client data
 
