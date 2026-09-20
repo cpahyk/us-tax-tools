@@ -2,10 +2,12 @@
 
 import { useState, useTransition } from "react";
 import { inviteClient, sendOrganizerToClient } from "./actions";
+import { useEmailCooldown } from "@/lib/use-email-cooldown";
 
 type Template = { id: string; name: string; tax_year: number };
 
 export function InviteButton({ clientId, status }: { clientId: string; status: string }) {
+  const { seconds, startCooldown } = useEmailCooldown();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
 
@@ -19,15 +21,16 @@ export function InviteButton({ clientId, status }: { clientId: string; status: s
         onClick={() =>
           startTransition(async () => {
             const result = await inviteClient(clientId);
+            startCooldown(result.cooldownSeconds ?? 0);
             setMessage(result.error ?? "Invite sent.");
           })
         }
-        disabled={pending}
+        disabled={pending || seconds > 0}
         className="w-fit rounded-md bg-ledger px-3 py-2 text-sm font-medium text-white hover:bg-ledger-dark disabled:opacity-60"
       >
-        {pending ? "Sending…" : "Send portal invite"}
+        {pending ? "Sending…" : seconds > 0 ? `Retry in ${seconds}s` : "Send portal invite"}
       </button>
-      {message && <p className="text-sm text-ink-muted">{message}</p>}
+      {message && <p role="status" className="text-sm text-ink-muted">{message}</p>}
     </div>
   );
 }

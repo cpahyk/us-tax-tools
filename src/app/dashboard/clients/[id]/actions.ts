@@ -4,8 +4,9 @@ import { revalidatePath } from "next/cache";
 import { getCurrentProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { authEmailFailure } from "@/lib/auth-email-errors";
 
-type ActionResult = { error?: string; success?: boolean };
+type ActionResult = { error?: string; success?: boolean; cooldownSeconds?: number };
 
 export async function inviteClient(clientId: string): Promise<ActionResult> {
   const profile = await getCurrentProfile();
@@ -41,11 +42,11 @@ export async function inviteClient(clientId: string): Promise<ActionResult> {
   });
 
   if (inviteError) {
-    return { error: inviteError.message };
+    return authEmailFailure(inviteError, "staff");
   }
 
   revalidatePath(`/dashboard/clients/${clientId}`);
-  return { success: true };
+  return { success: true, cooldownSeconds: 60 };
 }
 
 export async function sendOrganizerToClient(input: {

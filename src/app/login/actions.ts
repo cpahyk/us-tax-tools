@@ -1,10 +1,13 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { authEmailFailure } from "@/lib/auth-email-errors";
+import { z } from "zod";
 
 export type SignInState = {
   status: "idle" | "sent" | "error";
   message?: string;
+  cooldownSeconds?: number;
 };
 
 export async function signIn(
@@ -13,7 +16,7 @@ export async function signIn(
 ): Promise<SignInState> {
   const email = String(formData.get("email") ?? "").trim();
 
-  if (!email || !email.includes("@")) {
+  if (!z.email().safeParse(email).success) {
     return { status: "error", message: "Enter a valid email address." };
   }
 
@@ -29,7 +32,8 @@ export async function signIn(
   });
 
   if (error) {
-    return { status: "error", message: error.message };
+    const failure = authEmailFailure(error, "client");
+    return { status: "error", message: failure.error, cooldownSeconds: failure.cooldownSeconds };
   }
 
   return { status: "sent", message: `Check ${email} for a sign-in link.` };

@@ -157,8 +157,10 @@ separate deliverable from the software.
    `NEXT_PUBLIC_SITE_URL` below (`http://localhost:3000` for local dev) and
    add it to the redirect allow list. Skip this step and the sign-in email
    will look fine but the link will 404 or land somewhere unexpected.
-4. **Know the email sending limit before you start testing.** Supabase's
-   built-in email service (what you're using until you set up your own) is
+4. **Know the email sending limit before you start testing.**
+   See [Auth email setup](docs/AUTH-EMAIL-SETUP.md) for existing-provider setup
+   and rate-limit troubleshooting.
+   Supabase's built-in email service (what you're using until you set up your own) is
    capped at 2 emails/hour, is best-effort with no delivery guarantee, and
    — unless you configure custom SMTP — will only deliver to addresses that
    are members of your Supabase organization. You will hit this limit
