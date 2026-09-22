@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
 
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -9,18 +9,20 @@ test('database authorization and organizer lifecycle', async () => {
   const db = new PGlite();
   try {
     await db.exec(`
-      create role anon; create role authenticated;
+      create role anon; create role authenticated; create role service_role bypassrls;
       create schema auth; create schema storage;
       create table auth.users (id uuid primary key, email text, raw_user_meta_data jsonb, raw_app_meta_data jsonb, invited_at timestamptz);
       create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
       grant usage on schema auth, storage to authenticated, anon;
-      create table storage.buckets (id text primary key, name text, public boolean);
+      create table storage.buckets (id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
       create table storage.objects (id uuid default gen_random_uuid(), bucket_id text, name text);
       alter table storage.objects enable row level security;
       grant select, insert on storage.objects to authenticated;
       create function storage.foldername(text) returns text[] language sql immutable as $$ select string_to_array($1, '/') $$;
     `);
-    for (const file of ['0001_init.sql', '0002_send_organizer.sql', '0003_save_organizer_response.sql', '0004_security_hardening.sql']) {
+    const files = (await readdir(new URL('../supabase/migrations/', import.meta.url))).filter(f => f.endsWith('.sql')).sort();
+    assert.equal(new Set(files.map(f => f.split('_')[0])).size, files.length, 'Migration versions must be unique');
+    for (const file of files) {
       const sql = (await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), 'utf8')).replace('create extension if not exists "pgcrypto";', '');
       await db.exec(sql);
     }
@@ -77,5 +79,33 @@ test('database authorization and organizer lifecycle', async () => {
     assert.equal((await db.query(`select profile_id from clients where id='${id(22)}'`)).rows[0].profile_id, id(13));
     assert.equal((await asUser(id(11), `select * from profiles where id='${id(13)}'`)).rows.length, 0);
     assert.equal((await asUser(id(11), `select * from profiles where id='${id(10)}'`)).rows.length, 1);
+    const documentId = (await db.query('select id from documents limit 1')).rows[0].id;
+    await db.query("insert into document_extractions(document_id,status,fields) values ($1,'completed','{}')", [documentId]);
+    await denied(id(10), "update document_extractions set fields='{}'", /permission denied/);
+    await denied(id(10), "update document_extractions set status='failed'", /permission denied/);
+    await asUser(id(10), `update document_extractions set reviewed_by='${id(10)}',reviewed_at=now()`);
+    assert.equal((await asUser(id(11), 'select * from document_extractions')).rows.length, 0);
+    await db.query("insert into organizer_item_suggestions(id,organizer_item_id,document_id,suggested_value,based_on) values ($1,$2,$3,$4,'Source')", [id(70),id(40),documentId,JSON.stringify('Suggested')]);
+    await denied(id(11), "update organizer_item_suggestions set suggested_value='null',status='accepted'", /permission denied/);
+    await denied(id(11), `select resolve_organizer_suggestion('${id(70)}',true)`, /no longer accepting/);
+    await denied(id(12), `select resolve_organizer_suggestion('${id(70)}',true)`, /Not authorized/);
+    await db.exec(`update organizers set status='sent' where id='${id(30)}'`);
+    await asUser(id(11), `select resolve_organizer_suggestion('${id(70)}',true)`);
+    assert.equal((await db.query(`select value from organizer_responses where organizer_item_id='${id(40)}'`)).rows[0].value, 'Suggested');
+    await denied(id(11), `select resolve_organizer_suggestion('${id(70)}',true)`, /already resolved/);
+    await db.query("insert into organizer_item_suggestions(id,organizer_item_id,document_id,suggested_value,based_on) values ($1,$2,$3,'123','Invalid text')", [id(71),id(40),documentId]);
+    await denied(id(11), `select resolve_organizer_suggestion('${id(71)}',true)`, /Invalid answer/);
+    assert.equal((await db.query(`select status from organizer_item_suggestions where id='${id(71)}'`)).rows[0].status, 'pending');
+    await asUser(id(11), `select resolve_organizer_suggestion('${id(71)}',false)`);
+    await db.exec(`insert into organizers(id,firm_id,client_id,tax_year,title,status,created_by) values ('${id(80)}','${id(2)}','${id(21)}',2025,'Other','sent','${id(12)}'); insert into organizer_items(id,organizer_id,prompt,response_type) values ('${id(81)}','${id(80)}','Other','text')`);
+    await assert.rejects(db.query("insert into organizer_item_suggestions(organizer_item_id,document_id,suggested_value,based_on) values ($1,$2,'123','Bad source')", [id(81),documentId]), /same organizer/);
+    await assert.rejects(db.exec(`update organizer_items set organizer_id='${id(80)}' where id='${id(40)}'`), /linked suggestions/);
+    const hash = 'a'.repeat(64);
+    await denied(id(11), `select reserve_otp_request('${hash}')`, /permission denied/);
+    const reservations = await Promise.all([asUser(null, `select reserve_otp_request('${hash}') as reserved`, 'service_role'), asUser(null, `select reserve_otp_request('${hash}') as reserved`, 'service_role')]);
+    assert.equal(reservations.filter(r=>r.rows[0].reserved).length, 1);
+    await db.exec("update otp_request_log set requested_at=now()-interval '61 seconds'");
+    assert.equal((await asUser(null, `select reserve_otp_request('${hash}') as reserved`, 'service_role')).rows[0].reserved, true);
+    assert.equal((await db.query("select file_size_limit from storage.buckets where id='client-documents'")).rows[0].file_size_limit, 20971520);
   } finally { await db.close(); }
 });

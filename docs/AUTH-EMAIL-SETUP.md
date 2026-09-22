@@ -34,9 +34,12 @@ as the SMTP password. Use a sender on your verified domain.
 
 Sign-in and invitation rate-limit errors now have specific messages and a
 60-second minimum UI retry delay. The delay is not the provider's quota reset
-time. The email sending cap can remain active longer. The UI cooldown is not
-a security rate limiter and resets on navigation; Supabase enforces requests
-server-side. The app does not automatically retry or bypass Auth email limits.
+time. The email sending cap can remain active longer. The UI cooldown resets on navigation. The login action also reserves a
+60-second cooldown atomically through a service-only database function, keyed
+by the SHA-256 digest of the normalized email. Database failures prevent sending.
+This supplements Supabase rate limits; direct Auth requests and attacks using
+many different addresses still require provider-side abuse protection. The app
+does not automatically retry or bypass Auth email limits.
 
 ## Deployment verification — September 21, 2026
 
@@ -61,3 +64,24 @@ The existing marketing domain is not evidence that the portal is deployed.
 - [Supabase SMTP configuration](https://supabase.com/docs/guides/auth/auth-smtp)
 - [Supabase Auth rate limits](https://supabase.com/docs/guides/auth/rate-limits)
 - [Resend SMTP configuration](https://resend.com/changelog/smtp-service)
+
+## Additional migrations applied — September 21, 2026
+
+- 0005_document_extraction: staff can update only review columns; clients have
+  no extraction access.
+- 0006_otp_cooldown: atomic service-only email reservation, one-day retention,
+  and a private document bucket limited to 20 MiB PDF/JPEG/PNG/WebP/GIF uploads.
+- 0007_organizer_suggestions: typed JSON values, same-organizer document scope,
+  protected source references, and atomic acceptance through the existing
+  validated response RPC. Direct suggestion updates are disallowed.
+
+All three migrations and their version records were applied in one transaction.
+Live checks verified that all tables are reachable, the first cooldown request
+succeeds, the next is rejected, anonymous callers cannot reserve requests, and
+storage limits are present. The database suite now discovers every migration
+and rejects duplicate versions. Login tests cover hashing, cooldown denial,
+database failure, and invalid email input.
+
+AI extraction remains disabled at the owner's request: no worker, provider
+calls, automatic document transmission, or AI suggestion UI is enabled. These
+tables and RPCs are preparation for a separately approved extraction workflow.
