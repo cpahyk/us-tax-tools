@@ -38,6 +38,24 @@ time. The email sending cap can remain active longer. The UI cooldown is not
 a security rate limiter and resets on navigation; Supabase enforces requests
 server-side. The app does not automatically retry or bypass Auth email limits.
 
+## Deployment verification — September 21, 2026
+
+Project `bftekjewrpcvkvogxbic` had no public application tables. Applied
+repository migrations 0001–0004 together in a transaction through the SQL
+editor and recorded their versions in `supabase_migrations.schema_migrations`.
+Created the user-approved initial firm and administrator profile, with an
+`account.admin_bootstrapped` audit entry. A real authenticated request returned
+HTTP 200 from `/dashboard` with the administrator role and no error boundary.
+
+Profile database errors now throw a server error rather than pretending the
+session is signed out. Authenticated users without a profile go to
+`/auth/setup-required`. Four regression tests cover those states.
+
+The portal remains a local Next.js application at `http://localhost:3000`.
+Publishing a public portal requires a Next.js host; then update Supabase's
+Site URL, redirect allowlist, and the deployed `NEXT_PUBLIC_SITE_URL` together.
+The existing marketing domain is not evidence that the portal is deployed.
+
 ## References
 
 - [Supabase SMTP configuration](https://supabase.com/docs/guides/auth/auth-smtp)

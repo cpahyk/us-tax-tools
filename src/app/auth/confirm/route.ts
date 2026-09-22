@@ -55,21 +55,6 @@ export async function GET(request: NextRequest) {
     redirect(next as Route);
   }
 
-  // No specific destination requested — send them to their own area.
-  const { data } = await supabase.auth.getClaims();
-  const userId = data?.claims?.sub;
-
-  if (userId) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", userId)
-      .single();
-
-    if (profile?.role === "client") {
-      redirect("/portal");
-    }
-  }
-
-  redirect("/dashboard");
+  // The home route resolves the role and handles incomplete account setup.
+  redirect("/");
 }

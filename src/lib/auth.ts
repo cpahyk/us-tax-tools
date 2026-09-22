@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export type Profile = {
@@ -36,10 +37,17 @@ export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
     .from("profiles")
     .select("id, firm_id, role, full_name, email")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
 
-  if (profileError || !profile) {
-    return null;
+  if (profileError) {
+    // A valid session with an unavailable database is not a signed-out user.
+    // Do not expose database details or send the user into another email flow.
+    console.error("[auth/profile] Profile lookup failed", { code: profileError.code });
+    throw new Error("Unable to load your account. Please try again later.");
+  }
+
+  if (!profile) {
+    redirect("/auth/setup-required");
   }
 
   return profile as Profile;
