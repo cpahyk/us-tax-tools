@@ -1,3 +1,5 @@
+import { Notifications } from "@/components/notifications";
+import { notificationEmailConfigured } from "@/lib/email";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOut } from "@/app/actions";
@@ -33,6 +35,7 @@ export default async function DashboardLayout({
             </Link>
           </nav>
           <div className="flex items-center gap-3 text-sm text-ink-muted">
+            <Notifications area="dashboard" emailConfigured={notificationEmailConfigured()} />
             <span>{profile.full_name}</span>
             <form action={signOut}>
               <button className="underline underline-offset-2 hover:text-ink">

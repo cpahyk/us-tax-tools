@@ -1,3 +1,4 @@
+import { RequestChanges } from "./request-changes";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCurrentProfile } from "@/lib/auth";
@@ -18,7 +19,7 @@ export default async function StaffOrganizerPage({
 
   const { data: organizer, error: organizerError } = await supabase
     .from("organizers")
-    .select("id, title, tax_year, status, submitted_at, client_id, clients!organizers_client_firm_fk(primary_contact_name)")
+    .select("id, title, tax_year, status, submitted_at, client_id, change_request_reason, clients!organizers_client_firm_fk(primary_contact_name)")
     .eq("id", id)
     .maybeSingle();
 
@@ -102,6 +103,8 @@ export default async function StaffOrganizerPage({
         )}
       </div>
 
+      {(organizer.status === "submitted" || organizer.status === "reviewed") && <RequestChanges organizerId={id} />}
+      {organizer.change_request_reason && <p className="whitespace-pre-wrap rounded border border-hairline p-3 text-sm">Last correction request: {organizer.change_request_reason}</p>}
       <section className="flex flex-col gap-3">
         <h2 className="font-medium text-ink">Responses</h2>
         {(items ?? []).map((item) => {

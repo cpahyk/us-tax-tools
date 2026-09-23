@@ -1,3 +1,5 @@
+import { Notifications } from "@/components/notifications";
+import { notificationEmailConfigured } from "@/lib/email";
 import { redirect } from "next/navigation";
 import { signOut } from "@/app/actions";
 import { getCurrentProfile } from "@/lib/auth";
@@ -22,6 +24,7 @@ export default async function PortalLayout({
         <div className="mx-auto flex max-w-2xl items-center justify-between px-6 py-4">
           <span className="font-semibold text-ink">US Tax Tools</span>
           <div className="flex items-center gap-3 text-sm text-ink-muted">
+            <Notifications area="portal" emailConfigured={notificationEmailConfigured()} />
             <span>{profile.full_name}</span>
             <form action={signOut}>
               <button className="underline underline-offset-2 hover:text-ink">

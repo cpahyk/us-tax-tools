@@ -126,5 +126,47 @@ test('database authorization and organizer lifecycle', async () => {
     await denied(id(10), `select prepare_client_invitation('${id(94)}')`, /different access/);
     await db.exec(`update clients set status='archived' where id='${id(91)}'`);
     await denied(id(10), `select prepare_client_invitation('${id(91)}')`, /Restore this client/);
+    // Message notifications route to the other party, are idempotent, and cannot leak across firms.
+    const staffMessage = (await asUser(id(10), `select (post_organizer_message('${id(30)}','Please check the document','${id(201)}')).id as id`)).rows[0].id;
+    await asUser(id(10), `select post_organizer_message('${id(30)}','Please check the document','${id(201)}')`);
+    assert.equal((await db.query(`select count(*)::int as n from notifications where event_key='message:${staffMessage}'`)).rows[0].n,1);
+    const clientNotification = (await asUser(id(11), `select id,kind from notifications where kind='message'`)).rows[0];
+    assert.ok(clientNotification);
+    assert.equal((await asUser(id(12), `select id from notifications where id='${clientNotification.id}'`)).rows.length,0);
+    await denied(id(11), 'select recipient_email from notifications', /permission denied/);
+    await denied(id(11), "update notifications set email_status='sent'", /permission denied/);
+    await asUser(id(12), `select mark_notification_read('${clientNotification.id}')`);
+    assert.equal((await db.query(`select read_at from notifications where id='${clientNotification.id}'`)).rows[0].read_at,null);
+    await asUser(id(11), `select mark_notification_read('${clientNotification.id}')`);
+    assert.ok((await db.query(`select read_at from notifications where id='${clientNotification.id}'`)).rows[0].read_at);
+    await asUser(id(11), `select post_organizer_message('${id(30)}','Client reply','${id(202)}')`);
+    assert.equal((await asUser(id(10), `select id from notifications where kind='message'`)).rows.length,1);
+    await denied(id(12), `select post_organizer_message('${id(30)}','Wrong client','${id(203)}')`, /row-level security/);
+    await denied(id(11), `select post_organizer_message('${id(30)}','Changed retry','${id(202)}')`, /does not match/);
+    await denied(id(11), `select post_organizer_message('${id(30)}',repeat('x',5001),'${id(204)}')`, /message_body_length/);
+    await db.exec(`update organizers set status='submitted' where id='${id(30)}'`);
+    await denied(id(11), `select request_organizer_changes('${id(30)}','Fix')`, /Not authorized/);
+    const previousCorrections=(await asUser(id(11), `select id from notifications where kind='changes_requested'`)).rows.length;
+    await asUser(id(10), `select request_organizer_changes('${id(30)}','Please correct the amount')`);
+    const reopened = (await db.query(`select status,submitted_at,change_request_reason from organizers where id='${id(30)}'`)).rows[0];
+    assert.equal(reopened.status,'sent'); assert.equal(reopened.submitted_at,null);
+    assert.equal(reopened.change_request_reason,'Please correct the amount');
+    assert.equal((await asUser(id(11), `select id from notifications where kind='changes_requested'`)).rows.length,previousCorrections+1);
+    await denied(id(10), `select request_organizer_changes('${id(30)}','Repeat')`, /not awaiting review/);
+    // Email leases isolate concurrent workers; only a matching lease may finish.
+    await denied(id(10), 'select * from claim_notification_emails()', /permission denied/);
+    const claimed = (await asUser(null, `select * from claim_notification_emails('${id(30)}')`, 'service_role')).rows;
+    assert.ok(claimed.length>0);
+    assert.equal((await asUser(null, `select * from claim_notification_emails('${id(30)}')`, 'service_role')).rows.length,0);
+    const notice=claimed[0];
+    await asUser(null, `select finish_notification_email('${notice.id}','${id(999)}',true)`, 'service_role');
+    assert.equal((await db.query(`select email_status from notifications where id='${notice.id}'`)).rows[0].email_status,'processing');
+    await asUser(null, `select finish_notification_email('${notice.id}','${notice.lease_id}',false)`, 'service_role');
+    assert.equal((await db.query(`select email_status from notifications where id='${notice.id}'`)).rows[0].email_status,'pending');
+    await db.exec(`update notifications set next_attempt_at=now()-interval '1 second' where id='${notice.id}'`);
+    const retry=(await asUser(null, `select * from claim_notification_emails('${id(30)}')`, 'service_role')).rows[0];
+    assert.notEqual(retry.lease_id,notice.lease_id);
+    await asUser(null, `select finish_notification_email('${retry.id}','${retry.lease_id}',true)`, 'service_role');
+    assert.equal((await db.query(`select email_status from notifications where id='${retry.id}'`)).rows[0].email_status,'sent');
   } finally { await db.close(); }
 });

@@ -17,7 +17,7 @@ export default async function OrganizerPage({
 
   const { data: organizer } = await supabase
     .from("organizers")
-    .select("id, title, tax_year, status, firm_id, client_id, submitted_at")
+    .select("id, title, tax_year, status, firm_id, client_id, submitted_at, change_request_reason")
     .eq("id", id)
     .single();
 
@@ -87,6 +87,11 @@ export default async function OrganizerPage({
         </p>
       </div>
 
+      {!readOnly && organizer.change_request_reason && <section className="rounded border border-amber-300 bg-amber-50 p-4">
+        <h2 className="font-semibold">Your preparer requested changes</h2>
+        <p className="mt-2 whitespace-pre-wrap">{organizer.change_request_reason}</p>
+        <p className="mt-2 text-sm">Update your answers below, then submit again.</p>
+      </section>}
       {readOnly && (
         <p className="rounded-md border border-hairline bg-white px-4 py-3 text-sm text-ink-muted">
           This organizer was submitted
