@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { authEmailFailure } from "@/lib/auth-email-errors";
 
-type ActionResult = { error?: string; success?: boolean; cooldownSeconds?: number };
+type ActionResult = { error?: string; success?: boolean; message?: string; cooldownSeconds?: number };
 
 export async function inviteClient(clientId: string): Promise<ActionResult> {
   const profile = await getCurrentProfile();
@@ -33,6 +33,25 @@ export async function inviteClient(clientId: string): Promise<ActionResult> {
   }
 
   const admin = createAdminClient();
+  const { data: invitationMode, error: preparationError } = await supabase.rpc("prepare_client_invitation", {
+    p_client_id: clientId,
+  });
+  if (preparationError) return { error: preparationError.message };
+
+  if (invitationMode === "signin") {
+    const { error } = await supabase.auth.signInWithOtp({
+      email: client.email,
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"}/auth/confirm`,
+      },
+    });
+    revalidatePath(`/dashboard/clients/${clientId}`);
+    if (error) return authEmailFailure(error, "staff");
+    return { success: true, message: "Sign-in link sent to the existing account.", cooldownSeconds: 60 };
+  }
+  if (invitationMode !== "invite") return { error: "Unable to prepare this invitation. Please try again." };
+
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(client.email, {
     data: {
       firm_id: client.firm_id,

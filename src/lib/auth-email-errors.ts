@@ -1,6 +1,12 @@
 type AuthEmailError = { code?: string; status?: number; message?: string };
 
 export function authEmailFailure(error: AuthEmailError, audience: "client" | "staff") {
+  if (audience === "staff" && ["email_exists", "user_already_exists"].includes(error.code ?? "")) {
+    return { error: "An account with this email already exists. Retry to send a sign-in link if its access matches this client.", cooldownSeconds: 60 };
+  }
+  if (audience === "staff" && error.code === "unexpected_failure") {
+    return { error: "The invitation could not complete account setup. Ask your administrator to check the Auth database logs.", cooldownSeconds: 0 };
+  }
   const emailLimit = error.code === "over_email_send_rate_limit" ||
     /email rate limit exceeded/i.test(error.message ?? "");
   const rateLimited = emailLimit || error.status === 429 || error.code === "over_request_rate_limit";

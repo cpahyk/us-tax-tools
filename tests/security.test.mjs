@@ -107,5 +107,24 @@ test('database authorization and organizer lifecycle', async () => {
     await db.exec("update otp_request_log set requested_at=now()-interval '61 seconds'");
     assert.equal((await asUser(null, `select reserve_otp_request('${hash}') as reserved`, 'service_role')).rows[0].reserved, true);
     assert.equal((await db.query("select file_size_limit from storage.buckets where id='client-documents'")).rows[0].file_size_limit, 20971520);
+    await denied(id(11), `select prepare_client_invitation('${id(20)}')`, /Not authorized/);
+    await denied(id(10), `select prepare_client_invitation('${id(21)}')`, /Client not found/);
+    assert.equal((await asUser(id(10), `select prepare_client_invitation('${id(20)}') as mode`)).rows[0].mode,'signin');
+    await db.exec(`alter table auth.users disable trigger on_auth_user_created;
+      insert into auth.users(id,email) values ('${id(90)}','existing@a.test');
+      alter table auth.users enable trigger on_auth_user_created;
+      insert into clients(id,firm_id,primary_contact_name,email,created_by) values
+      ('${id(91)}','${id(1)}','Existing','existing@a.test','${id(10)}'),
+      ('${id(92)}','${id(1)}','New','new@a.test','${id(10)}'),
+      ('${id(93)}','${id(1)}','Staff conflict','staff@a.test','${id(10)}'),
+      ('${id(94)}','${id(1)}','Other firm','client@b.test','${id(10)}')`);
+    assert.equal((await asUser(id(10), `select prepare_client_invitation('${id(91)}') as mode`)).rows[0].mode,'signin');
+    assert.equal((await db.query(`select profile_id from clients where id='${id(91)}'`)).rows[0].profile_id,id(90));
+    assert.equal((await db.query(`select role from profiles where id='${id(90)}'`)).rows[0].role,'client');
+    assert.equal((await asUser(id(10), `select prepare_client_invitation('${id(92)}') as mode`)).rows[0].mode,'invite');
+    await denied(id(10), `select prepare_client_invitation('${id(93)}')`, /different access/);
+    await denied(id(10), `select prepare_client_invitation('${id(94)}')`, /different access/);
+    await db.exec(`update clients set status='archived' where id='${id(91)}'`);
+    await denied(id(10), `select prepare_client_invitation('${id(91)}')`, /Restore this client/);
   } finally { await db.close(); }
 });

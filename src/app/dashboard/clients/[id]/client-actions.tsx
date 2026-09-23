@@ -11,8 +11,8 @@ export function InviteButton({ clientId, status }: { clientId: string; status: s
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
 
-  if (status === "active") {
-    return <span className="text-sm text-ink-muted">Client has activated their account.</span>;
+  if (status === "archived") {
+    return <span className="text-sm text-ink-muted">Restore this client before sending a portal link.</span>;
   }
 
   return (
@@ -22,13 +22,13 @@ export function InviteButton({ clientId, status }: { clientId: string; status: s
           startTransition(async () => {
             const result = await inviteClient(clientId);
             startCooldown(result.cooldownSeconds ?? 0);
-            setMessage(result.error ?? "Invite sent.");
+            setMessage(result.error ?? result.message ?? "Invite sent.");
           })
         }
         disabled={pending || seconds > 0}
         className="w-fit rounded-md bg-ledger px-3 py-2 text-sm font-medium text-white hover:bg-ledger-dark disabled:opacity-60"
       >
-        {pending ? "Sending…" : seconds > 0 ? `Retry in ${seconds}s` : "Send portal invite"}
+        {pending ? "Sending…" : seconds > 0 ? `Retry in ${seconds}s` : status === "active" ? "Send sign-in link" : "Send portal invite"}
       </button>
       {message && <p role="status" className="text-sm text-ink-muted">{message}</p>}
     </div>
