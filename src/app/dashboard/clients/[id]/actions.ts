@@ -1,5 +1,6 @@
 "use server";
 
+import { scheduleNotificationEmails } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { getCurrentProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -91,6 +92,7 @@ export async function sendOrganizerToClient(input: {
     return { error: error.message };
   }
 
+  scheduleNotificationEmails();
   revalidatePath(`/dashboard/clients/${input.clientId}`);
   return { success: true };
 }

@@ -1,7 +1,7 @@
 "use server";
 
 import { getCurrentProfile } from "@/lib/auth";
-import { sendNotificationEmail } from "@/lib/email";
+import { scheduleNotificationEmails } from "@/lib/notifications";
 import { createClient } from "@/lib/supabase/server";
 
 export type PostedMessage = {
@@ -15,7 +15,8 @@ export type PostedMessage = {
 
 export async function postOrganizerMessage(
   organizerId: string,
-  body: string
+  body: string,
+  requestId: string
 ): Promise<{ error?: string; message?: PostedMessage }> {
   const profile = await getCurrentProfile();
   if (!profile) {
@@ -23,22 +24,18 @@ export async function postOrganizerMessage(
   }
 
   const trimmed = body.trim();
-  if (!trimmed) {
-    return { error: "Message can't be empty." };
+  if (!trimmed || trimmed.length > 5000) {
+    return { error: "Enter a message between 1 and 5000 characters." };
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("organizer_messages")
-    .insert({ organizer_id: organizerId, author_id: profile.id, body: trimmed })
-    .select("id, author_id, body, created_at")
-    .single();
+  const { data, error } = await supabase.rpc("post_organizer_message", { p_organizer_id: organizerId, p_body: trimmed, p_request_id: requestId });
 
   if (error || !data) {
     return { error: error?.message ?? "Couldn't send the message." };
   }
 
-  await notifyOtherParty(organizerId, profile, trimmed);
+  scheduleNotificationEmails(organizerId);
 
   return {
     message: {
@@ -49,52 +46,21 @@ export async function postOrganizerMessage(
   };
 }
 
-async function notifyOtherParty(
-  organizerId: string,
-  author: { id: string; role: string; full_name: string },
-  body: string
-) {
+export async function getOrganizerMessages(organizerId: string): Promise<{ messages?: PostedMessage[]; error?: string }> {
   const supabase = await createClient();
-  const { data: organizer } = await supabase
-    .from("organizers")
-    .select("title, created_by, client_id")
-    .eq("id", organizerId)
-    .single();
+  const { data, error } = await supabase.from("organizer_messages")
+    .select("id,author_id,body,created_at,profiles(full_name,role)")
+    .eq("organizer_id", organizerId).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(100);
+  if (error) return { error: "Messages could not be refreshed." };
+  const messages = (data ?? []).reverse().map(row => {
+    const author = row.profiles as unknown as { full_name: string; role: string } | null;
+    return { id: row.id, author_id: row.author_id, body: row.body, created_at: row.created_at, author_name: author?.full_name ?? "Unknown", author_role: author?.role ?? "" };
+  });
+  return { messages };
+}
 
-  if (!organizer) return;
-
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-  const preview = body.length > 200 ? `${body.slice(0, 200)}…` : body;
-
-  if (author.role === "client") {
-    // Client posted — notify the assigned staff member.
-    const { data: staffProfile } = await supabase
-      .from("profiles")
-      .select("email")
-      .eq("id", organizer.created_by)
-      .single();
-
-    if (staffProfile) {
-      await sendNotificationEmail({
-        to: staffProfile.email,
-        subject: `New message on "${organizer.title}"`,
-        text: `${author.full_name} wrote:\n\n${preview}\n\n${siteUrl}/dashboard/organizers/${organizerId}`,
-      });
-    }
-  } else {
-    // Staff posted — notify the client.
-    const { data: client } = await supabase
-      .from("clients")
-      .select("email")
-      .eq("id", organizer.client_id)
-      .single();
-
-    if (client) {
-      await sendNotificationEmail({
-        to: client.email,
-        subject: `New message about your ${organizer.title}`,
-        text: `${author.full_name} wrote:\n\n${preview}\n\n${siteUrl}/portal/organizers/${organizerId}`,
-      });
-    }
-  }
+export async function markOrganizerMessagesRead(organizerId: string, through: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("mark_message_notifications_read", { p_organizer_id: organizerId, p_through: through });
+  return { error: error ? "Read status could not be saved." : undefined };
 }

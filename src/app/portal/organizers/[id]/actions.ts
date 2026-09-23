@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { sendNotificationEmail } from "@/lib/email";
+import { scheduleNotificationEmails } from "@/lib/notifications";
 import { createClient } from "@/lib/supabase/server";
 
 type ActionResult = { error?: string; success?: boolean };
@@ -20,6 +20,7 @@ export async function saveResponse(
     return { error: error.message };
   }
 
+  scheduleNotificationEmails();
   return { success: true };
 }
 
@@ -34,33 +35,6 @@ export async function submitOrganizerAction(organizerId: string): Promise<Action
   }
 
   revalidatePath(`/portal/organizers/${organizerId}`);
-  await notifyStaffOfSubmission(organizerId);
+  scheduleNotificationEmails(organizerId);
   return { success: true };
-}
-
-async function notifyStaffOfSubmission(organizerId: string) {
-  const supabase = await createClient();
-  const { data: organizer } = await supabase
-    .from("organizers")
-    .select("title, tax_year, created_by, client_id")
-    .eq("id", organizerId)
-    .single();
-
-  if (!organizer) return;
-
-  const [{ data: staffProfile }, { data: client }] = await Promise.all([
-    supabase.from("profiles").select("email").eq("id", organizer.created_by).single(),
-    supabase.from("clients").select("primary_contact_name").eq("id", organizer.client_id).single(),
-  ]);
-
-  if (!staffProfile) return;
-
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-  await sendNotificationEmail({
-    to: staffProfile.email,
-    subject: `${client?.primary_contact_name ?? "A client"} submitted their ${organizer.tax_year} organizer`,
-    text:
-      `${client?.primary_contact_name ?? "A client"} just submitted "${organizer.title}".\n\n` +
-      `Review it: ${siteUrl}/dashboard/organizers/${organizerId}`,
-  });
 }

@@ -16,11 +16,16 @@ export default async function StaffOrganizerPage({
   const profile = await getCurrentProfile();
   const supabase = await createClient();
 
-  const { data: organizer } = await supabase
+  const { data: organizer, error: organizerError } = await supabase
     .from("organizers")
-    .select("id, title, tax_year, status, submitted_at, client_id, clients(primary_contact_name)")
+    .select("id, title, tax_year, status, submitted_at, client_id, clients!organizers_client_firm_fk(primary_contact_name)")
     .eq("id", id)
-    .single();
+    .maybeSingle();
+
+  if (organizerError) {
+    console.error("[staff/organizer] Lookup failed", { code: organizerError.code });
+    throw new Error("Unable to load this organizer. Please try again.");
+  }
 
   if (!organizer || !profile) {
     notFound();

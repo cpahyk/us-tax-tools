@@ -1,42 +1,22 @@
 import "server-only";
 import { Resend } from "resend";
 
-const FROM_ADDRESS = process.env.EMAIL_FROM ?? "US Tax Tools <onboarding@resend.dev>";
+export function notificationEmailConfigured() {
+  return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM && process.env.NEXT_PUBLIC_SITE_URL);
+}
 
-/**
- * Sends a transactional notification email (organizer submitted, new
- * message, etc).
- *
- * Deliberately never throws. Every call site here is a "by the way" side
- * effect of something that already succeeded (a submission, a posted
- * message) — a missing API key or a flaky network call should show up in
- * the logs, not turn a successful action into a failed one for the user.
- */
+// Provider acceptance is not proof of delivery. Never log recipient or content.
 export async function sendNotificationEmail(input: {
-  to: string;
-  subject: string;
-  text: string;
-}): Promise<void> {
-  const apiKey = process.env.RESEND_API_KEY;
-
-  if (!apiKey) {
-    console.warn(`[email] RESEND_API_KEY not set — skipped "${input.subject}" to ${input.to}`);
-    return;
-  }
-
+  to: string; subject: string; text: string; idempotencyKey: string;
+}): Promise<boolean> {
+  if (!notificationEmailConfigured()) return false;
   try {
-    const resend = new Resend(apiKey);
+    const resend = new Resend(process.env.RESEND_API_KEY);
     const { error } = await resend.emails.send({
-      from: FROM_ADDRESS,
-      to: input.to,
-      subject: input.subject,
-      text: input.text,
-    });
-
-    if (error) {
-      console.error(`[email] "${input.subject}" to ${input.to} failed:`, error.message);
-    }
-  } catch (err) {
-    console.error(`[email] Network error sending "${input.subject}" to ${input.to}:`, err);
+      from: process.env.EMAIL_FROM!, to: input.to, subject: input.subject, text: input.text,
+    }, { idempotencyKey: input.idempotencyKey });
+    return !error;
+  } catch {
+    return false;
   }
 }
