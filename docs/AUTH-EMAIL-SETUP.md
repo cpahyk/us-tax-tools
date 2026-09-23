@@ -85,3 +85,17 @@ database failure, and invalid email input.
 AI extraction remains disabled at the owner's request: no worker, provider
 calls, automatic document transmission, or AI suggestion UI is enabled. These
 tables and RPCs are preparation for a separately approved extraction workflow.
+
+## Existing-account invitation repair — September 23, 2026
+
+Migration 0008 adds a staff-scoped invitation preparation RPC. New addresses
+continue through Auth invitations. Existing accounts without a profile can be
+linked to the requested client in the caller's firm; existing staff accounts,
+other-firm profiles, archived clients, and conflicting client links are rejected.
+The linking operation is transactional and audited. Existing users receive a
+sign-in link without allowing signup. Active clients retain a resend button so
+an email delivery failure does not prevent retries.
+
+The migration was applied to the hosted project. Regression coverage includes
+unprovisioned users, new users, client callers, cross-firm callers, conflicting
+roles, and archived clients. No retry email was sent during verification.
