@@ -265,6 +265,12 @@ function FileField({
     setUploading(true);
     setError(null);
     try {
+      if (file.size > 20 * 1024 * 1024) {
+        throw new Error("Choose a file no larger than 20 MB.");
+      }
+      if (!["application/pdf", "image/jpeg", "image/png", "image/webp", "image/gif"].includes(file.type)) {
+        throw new Error("Choose a PDF, JPEG, PNG, WebP, or GIF file.");
+      }
       const supabase = createClient();
       const { data: claims, error: authError } = await supabase.auth.getClaims();
       if (authError || !claims?.claims?.sub) throw new Error("Please sign in again before uploading.");
@@ -326,6 +332,8 @@ function FileField({
       )}
       <input
         type="file"
+        accept="application/pdf,image/jpeg,image/png,image/webp,image/gif"
+        aria-label={`Upload a file for ${item.prompt}`}
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) void handleUpload(file);
@@ -334,8 +342,9 @@ function FileField({
         disabled={uploading}
         className="text-sm"
       />
+      <p className="text-xs text-ink-muted">PDF, JPEG, PNG, WebP, or GIF. Maximum 20 MB per file.</p>
       {uploading && <p className="text-xs text-ink-muted">Uploading…</p>}
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
     </div>
   );
 }
