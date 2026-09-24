@@ -19,6 +19,8 @@ Never commit credentials. Authentication SMTP in Supabase is configured separate
 
 Actions and inbox refreshes attempt queued delivery. For retries when nobody is using the app, configure the hosting scheduler to POST to `/api/notifications/dispatch` every five minutes with `Authorization: Bearer <NOTIFICATION_CRON_SECRET>`. Store this authorization value in the scheduler's secret store. No hosting scheduler is configured yet.
 
+Netlify deployment is now selected. `netlify.toml` configures the Next.js build and a five-minute scheduled function, `netlify/functions/notification-retry.mjs`. This schedule becomes active only after a production deploy. Set the notification secret in Netlify's Functions environment as well as the app runtime. The scheduler uses Netlify's `URL` origin, requires HTTPS, disallows redirects when sending the bearer secret, and reports dispatch failures in function logs. Netlify account sign-in is currently pending; these files alone do not publish the portal.
+
 ## Verified September 24, 2026
 
 - Migration 0009 applied to project `bftekjewrpcvkvogxbic`.
@@ -29,6 +31,8 @@ Actions and inbox refreshes attempt queued delivery. For retries when nobody is 
 - 17 automated tests and lint pass; production build passed during implementation.
 
 The portal currently runs locally. Before external client use, deploy it to a server-capable host, set the public origin and notification secrets there, update Supabase Auth redirect URLs, and configure the scheduler. A static marketing site cannot run this Next.js server application.
+
+Hostinger was selected for deployment. The signed-in account currently shows a Premium free trial limited to Website Builder; its Web Apps screen requires a Business or Cloud plan. Deployment is waiting for an eligible hosting plan. No hosting purchase, DNS change, or production secret transfer has been made. A fresh production build passed on September 24, 2026.
 
 On this Windows machine, Node needs the system certificate store for outbound HTTPS. The verified development launch used PowerShell `$env:NODE_OPTIONS='--use-system-ca'` followed by `npm run dev`. Keep TLS verification enabled.
 
